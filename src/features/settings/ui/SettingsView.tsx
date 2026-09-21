@@ -207,8 +207,8 @@ import { loadTabGroupLabels, resolveTabGroupLabel } from "../../workspace/model/
 import {
   filterKeybindings,
   KEYBINDINGS,
+  loadClaudeConfigDir,
   loadClaudeHooks,
-  loadClaudeExtras,
   loadCloseToTray,
   loadHarnessRuntime,
   loadCollapsedProjectRailMode,
@@ -221,8 +221,8 @@ import {
   loadModelControls,
   loadNotesEnabled,
   loadTabAnimationsEnabled,
+  saveClaudeConfigDir,
   saveClaudeHooks,
-  saveClaudeExtras,
   saveCloseToTray,
   saveHarnessRuntime,
   saveCollapsedProjectRailMode,
@@ -239,7 +239,6 @@ import {
   settingsSectionDescription,
   settingsSectionLabel,
   COLLAPSED_PROJECT_RAIL_MODE_DEFAULT,
-  type ClaudeExtraSettings,
   type CollapsedProjectRailMode,
   type HarnessRuntimeEnvVar,
   type HarnessRuntimeSettings,
@@ -2616,7 +2615,7 @@ const DEFAULT_HARNESS_BINARY: Record<HarnessId, string> = {
   cursor: "cursor-agent",
   grok: "grok",
   opencode: "opencode",
-  pi: "pi",
+  pi: "pi-coding-agent",
   omp: "omp",
   fx: "fx",
   hermes: "hermes",
@@ -2728,13 +2727,13 @@ function ProviderRow({
 
 /** Binary path, launch arguments, and env vars apply the same way to every
  * harness (see `harness_spawn` in src-tauri, which is generic over these).
- * Claude additionally gets a CLAUDE_CONFIG_DIR convenience and its CLI's own
- * --autocompact flag, neither of which generalizes to the other CLIs. */
+ * Claude additionally gets a CLAUDE_CONFIG_DIR convenience, which doesn't
+ * generalize to the other CLIs. */
 function ProviderRuntimePanel({ harness }: { harness: HarnessId }) {
   const [runtime, setRuntime] = useState<HarnessRuntimeSettings>(() =>
     loadHarnessRuntime(harness),
   );
-  const [extras, setExtras] = useState<ClaudeExtraSettings>(loadClaudeExtras);
+  const [configDir, setConfigDir] = useState<string>(loadClaudeConfigDir);
 
   const update = (patch: Partial<HarnessRuntimeSettings>) => {
     setRuntime((prev) => {
@@ -2744,12 +2743,9 @@ function ProviderRuntimePanel({ harness }: { harness: HarnessId }) {
     });
   };
 
-  const updateExtras = (patch: Partial<ClaudeExtraSettings>) => {
-    setExtras((prev) => {
-      const next = { ...prev, ...patch };
-      saveClaudeExtras(next);
-      return next;
-    });
+  const onConfigDir = (value: string) => {
+    saveClaudeConfigDir(value);
+    setConfigDir(value);
   };
 
   const addEnvVar = () => {
@@ -2787,12 +2783,12 @@ function ProviderRuntimePanel({ harness }: { harness: HarnessId }) {
       {harness === "claude" ? (
         <Row
           label="CLAUDE_CONFIG_DIR path"
-          description="Custom Claude home and config directory. Overrides any provider account profile. Leave blank to use ~/.claude."
+          description="Custom Claude home and config directory. Overrides any provider account profile, and takes precedence over a CLAUDE_CONFIG_DIR set below in Environment variables. Leave blank to use ~/.claude."
         >
           <RuntimeTextInput
-            value={extras.configDir}
+            value={configDir}
             placeholder="~/.claude"
-            onChange={(value) => updateExtras({ configDir: value })}
+            onChange={onConfigDir}
             ariaLabel="CLAUDE_CONFIG_DIR path"
           />
         </Row>

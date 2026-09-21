@@ -11,9 +11,9 @@ import {
   watchChild,
 } from "../../core/child";
 import {
-  harnessRuntimeBinaryPath,
   harnessRuntimeEnv,
   harnessRuntimeExtraArgs,
+  resolveHarnessBinary,
 } from "../../core/runtime";
 import { loadHarnessRuntime } from "../../../../features/settings/model/settings";
 import {
@@ -319,8 +319,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   }
 
   const runtime = loadHarnessRuntime("opencode");
-  const overrideBinaryPath = harnessRuntimeBinaryPath(runtime);
-  const path = overrideBinaryPath || (await resolveOpenCodeBinaryImpl()).path;
+  const { path } = await resolveHarnessBinary("opencode", resolveOpenCodeBinaryImpl);
   await assertOpenCodeVersion(path, input.cwd);
 
   const liveRef: { current: Live | null } = { current: null };
