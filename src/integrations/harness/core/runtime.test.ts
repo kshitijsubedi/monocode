@@ -7,6 +7,7 @@ import {
 import {
   harnessRuntimeBinaryPath,
   harnessRuntimeEnv,
+  harnessRuntimeEnvValue,
   harnessRuntimeExtraArgs,
   resolveHarnessBinary,
 } from "./runtime";
@@ -121,5 +122,28 @@ describe("resolveHarnessBinary", () => {
         throw new Error("not found");
       }),
     ).rejects.toThrow("not found");
+  });
+});
+
+describe("harnessRuntimeEnvValue", () => {
+  it("returns the trimmed value for a matching key", () => {
+    expect(
+      harnessRuntimeEnvValue(
+        runtime({ env: [{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: " sk-ant-oat-1 " }] }),
+        "CLAUDE_CODE_OAUTH_TOKEN",
+      ),
+    ).toBe("sk-ant-oat-1");
+  });
+
+  it("returns undefined when the key is absent or blank", () => {
+    expect(
+      harnessRuntimeEnvValue(runtime({}), "CLAUDE_CODE_OAUTH_TOKEN"),
+    ).toBeUndefined();
+    expect(
+      harnessRuntimeEnvValue(
+        runtime({ env: [{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: "   " }] }),
+        "CLAUDE_CODE_OAUTH_TOKEN",
+      ),
+    ).toBeUndefined();
   });
 });

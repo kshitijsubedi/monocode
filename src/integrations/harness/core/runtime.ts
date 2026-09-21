@@ -24,6 +24,19 @@ export function harnessRuntimeEnv(
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
+/** The value of one env var from a runtime override, trimmed, or undefined
+ * when it isn't set (or is blank). Lets a caller that needs one specific
+ * variable's value (e.g. an OAuth token override) read it without building
+ * the whole env record. */
+export function harnessRuntimeEnvValue(
+  runtime: HarnessRuntimeSettings,
+  key: string,
+): string | undefined {
+  const value = runtime.env.find((entry) => entry.key.trim() === key)?.value;
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /** Splits a launch-args string the way a shell would for simple cases:
  * whitespace-separated, with single or double quotes grouping a value that
  * contains spaces (`--config "my file.json"` -> ["--config", "my file.json"]).

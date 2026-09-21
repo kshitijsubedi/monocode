@@ -402,12 +402,21 @@ fn usage_result(
 /// `config_dir_override` mirrors the manual CLAUDE_CONFIG_DIR runtime setting
 /// (see `harness_spawn`): when set, it wins over the account-derived dir, so
 /// usage reflects wherever the user actually pointed the CLI's credentials.
+///
+/// `oauth_token_override` mirrors a manual CLAUDE_CODE_OAUTH_TOKEN env var:
+/// a user authenticating that way has no on-disk credential file at all, so
+/// there is nothing for `config_dir_override` to find — this uses the token
+/// directly instead of reading from disk.
 #[tauri::command]
 pub async fn fetch_claude_usage(
     app: AppHandle,
     account_id: Option<String>,
     config_dir_override: Option<String>,
+    oauth_token_override: Option<String>,
 ) -> Result<ClaudeUsageFetch, String> {
+    if let Some(token) = oauth_token_override.filter(|token| !token.trim().is_empty()) {
+        return Ok(fetch_usage_with_token(token.trim()));
+    }
     let account_dir = crate::harness::provider_account_dir(&app, "claude", account_id.as_deref())?;
     let config_dir = claude_usage_config_dir(config_dir_override, account_dir);
     tauri::async_runtime::spawn_blocking(move || fetch_claude_usage_sync(config_dir))
