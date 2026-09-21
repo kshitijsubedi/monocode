@@ -1,7 +1,13 @@
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
 import type { RuntimeMode } from "../../../../features/sessions/model/session";
-import { loadClaudeHooks } from "../../../../features/settings/model/settings";
+import {
+  loadClaudeExtras,
+  loadClaudeHooks,
+  loadHarnessRuntime,
+  type ClaudeExtraSettings,
+  type HarnessRuntimeSettings,
+} from "../../../../features/settings/model/settings";
 import {
   killChild,
   resolveClaudeBinary,
@@ -63,6 +69,11 @@ import {
   type ClaudeControlRequest,
 } from "./claudeProtocol";
 import { isAgentToolName } from "../../core/preview";
+import {
+  harnessRuntimeBinaryPath,
+  harnessRuntimeEnv,
+  harnessRuntimeExtraArgs,
+} from "../../core/runtime";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
 import {
   questionPromptTitle,
@@ -365,7 +376,10 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     resumeByThread.delete(input.sessionId);
   }
 
-  const { path } = await resolveClaudeBinaryImpl();
+  const runtime = loadHarnessRuntime("claude");
+  const extras = loadClaudeExtras();
+  const overrideBinaryPath = harnessRuntimeBinaryPath(runtime);
+  const path = overrideBinaryPath || (await resolveClaudeBinaryImpl()).path;
   const liveRef: { current: Live | null } = { current: null };
   const claudeSessionId =
     canResume && resume ? resume.sessionId : crypto.randomUUID();
@@ -373,6 +387,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     input,
     canResume ? resume?.sessionId : undefined,
     claudeSessionId,
+    runtime,
   );
 
   const live: Live = {
@@ -437,6 +452,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     buildClaudeSpawnArgs(launch),
     input.cwd,
     { provider: "claude", id: input.providerAccountId ?? "default" },
+    claudeRuntimeEnv(runtime, extras),
   );
 
   liveByThread.set(input.sessionId, live);
@@ -1378,6 +1394,7 @@ function launchOptions(
   input: HarnessSessionInput,
   resume: string | undefined,
   sessionId: string,
+  runtime: HarnessRuntimeSettings,
 ): {
   model?: string;
   effort?: string;
@@ -1385,6 +1402,7 @@ function launchOptions(
   resume?: string;
   sessionId?: string;
   settings?: ClaudeCliSettings;
+  extraArgs?: string[];
 } {
   const native = nativeModelId(input.model);
   const effortRaw = input.modelSettings?.effort;
@@ -1402,6 +1420,7 @@ function launchOptions(
   if (!loadClaudeHooks()) {
     settings.disableAllHooks = true;
   }
+  const extraArgs = harnessRuntimeExtraArgs(runtime);
   return {
     model: resolveClaudeApiModelId(native, context),
     effort: normalizeClaudeCliEffort(effortRaw, native),
@@ -1412,7 +1431,23 @@ function launchOptions(
     resume,
     sessionId: resume ? undefined : sessionId,
     settings: Object.keys(settings).length > 0 ? settings : undefined,
+    extraArgs,
   };
+}
+
+/** CLAUDE_CONFIG_DIR mirrors the isolation `apply_provider_account` sets in
+ * Rust for a provider account; a manual override here always wins over it. */
+function claudeRuntimeEnv(
+  runtime: HarnessRuntimeSettings,
+  extras: ClaudeExtraSettings,
+): Record<string, string> | undefined {
+  const configDir = extras.configDir.trim();
+  const env = harnessRuntimeEnv(runtime) ?? {};
+  if (configDir) {
+    env.CLAUDE_CONFIG_DIR = configDir;
+    env.CLAUDE_SECURESTORAGE_CONFIG_DIR = configDir;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
 }
 
 /** Exported for tests. */
