@@ -206,9 +206,18 @@ function emitBashFinished(taskId = "b1") {
   });
 }
 
-function backgroundUpdates(events: HarnessEvent[]): string[][] {
+function backgroundUpdates(
+  events: HarnessEvent[],
+): { waiting: boolean; tasks: string[] }[] {
   return events.flatMap((event) =>
-    event.type === "background.updated" ? [event.tasks] : [],
+    event.type === "background.updated"
+      ? [
+          {
+            waiting: event.waiting,
+            tasks: event.tasks.map((task) => task.description),
+          },
+        ]
+      : [],
   );
 }
 
@@ -702,6 +711,127 @@ describe("claude subagents", () => {
     );
   });
 
+  it("keeps the turn open past a resumed session's replayed task notification", async () => {
+    const { events, turn } = await startTurn("s1");
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+
+    // A resumed session first reports the subagent the restart killed, in a
+    // turn of its own, before it reads the prompt.
+    emit({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t_killed",
+      status: "stopped",
+      summary: 'Background agent "clock logger" didn\'t finish',
+    });
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "result",
+      subtype: "success",
+      session_id: "sess_1",
+      num_turns: 0,
+      result: "",
+      origin: { kind: "task-notification" },
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(settled).toBe(false);
+
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_send",
+            name: "SendMessage",
+            input: { to: "t_killed", message: "Resume the loop" },
+          },
+        ],
+      },
+    });
+    emit({
+      type: "system",
+      subtype: "background_tasks_changed",
+      tasks: [
+        { task_id: "t_killed", task_type: "local_agent", description: "clock logger" },
+      ],
+    });
+    emit({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t_killed",
+      tool_use_id: "toolu_send",
+      description: "clock logger",
+      task_type: "local_agent",
+      is_backgrounded: true,
+    });
+    emit({
+      type: "user",
+      session_id: "sess_1",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_send",
+            content: '{"success":true,"message":"Resuming agent"}',
+          },
+        ],
+      },
+    });
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      message: { content: [{ type: "text", text: "Resumed" }] },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(settled).toBe(false);
+    expect(events).toContainEqual({
+      type: "background.updated",
+      tasks: [{ id: "t_killed", kind: "agent", description: "clock logger" }],
+      waiting: true,
+    });
+
+    // The resumed agent still names the Agent call from before the restart.
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      parent_tool_use_id: "toolu_agent_before_restart",
+      task_description: "clock logger",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_loop",
+            name: "Bash",
+            input: { command: "for i in $(seq 1 20); do date; sleep 5; done" },
+          },
+        ],
+      },
+    });
+    const steps = events.filter((event) => event.type === "agent.step");
+    expect(steps.length).toBeGreaterThan(0);
+    expect(steps.every((step) => step.callId === "toolu_send")).toBe(true);
+
+    emit({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t_killed",
+      tool_use_id: "toolu_send",
+      status: "completed",
+      summary: "Final timestamp: 09:38:10",
+    });
+    emitFollowUpTurn("Clock logger completed.");
+    await turn;
+    expect(settled).toBe(true);
+  });
+
   it("does not end the turn on a subagent result", async () => {
     const { events, turn } = await startTurn("s1");
     let settled = false;
@@ -940,7 +1070,8 @@ describe("claude background tasks", () => {
       false,
     );
     expect(backgroundUpdates(events)).toEqual([
-      ["Wait 30 seconds then print done"],
+      { waiting: false, tasks: ["Wait 30 seconds then print done"] },
+      { waiting: true, tasks: ["Wait 30 seconds then print done"] },
     ]);
 
     emitBashFinished();
@@ -950,8 +1081,9 @@ describe("claude background tasks", () => {
     emitFollowUpTurn("It finished and printed done.");
     await turn;
     expect(backgroundUpdates(events)).toEqual([
-      ["Wait 30 seconds then print done"],
-      [],
+      { waiting: false, tasks: ["Wait 30 seconds then print done"] },
+      { waiting: true, tasks: ["Wait 30 seconds then print done"] },
+      { waiting: false, tasks: [] },
     ]);
     // The command waited on sits under the message Claude left off with as
     // a row of its own, and the reply is a new message after it, once.

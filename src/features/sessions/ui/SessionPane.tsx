@@ -540,6 +540,7 @@ export const SessionPane = memo(function SessionPane({
       onStop={() => onStop(session.id)}
       onCompactContext={() => onCompactContext(session.id)}
       onPlaceInFolder={(target) => onPlaceSessionInFolder(session.id, target)}
+      backgroundTasks={session.backgroundTasks}
       queuedMessages={session.queuedMessages}
       queueStatus={session.queueStatus}
       onDeleteQueuedMessage={(messageId) =>
@@ -708,7 +709,11 @@ export const SessionPane = memo(function SessionPane({
                   model={session.model}
                   modelSettings={session.modelSettings}
                   pendingQuestion={!!session.pendingQuestion}
-                  backgroundTasks={session.backgroundTasks}
+                  backgroundTasks={
+                    session.waitingOnBackground
+                      ? session.backgroundTasks
+                      : undefined
+                  }
                   onApproval={session.worktreeRemoved ? undefined : approve}
                   onAddToChat={addSelectionToChat}
                   onSaveNote={notesEnabled ? saveNote : undefined}

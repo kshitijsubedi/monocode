@@ -21,26 +21,40 @@ afterEach(() => {
 });
 
 describe("background work", () => {
-  it("tracks what a yielded turn waits on and drops it when the turn ends", () => {
+  it("tracks running work and the yielded wait, and drops both when the turn ends", () => {
+    const test = { id: "b1", kind: "shell" as const, description: "npm test" };
     let session = appendUser(newSession("claude", "/tmp"), "hi");
     session = applyHarnessEvent(session, {
       type: "background.updated",
-      tasks: ["npm test"],
+      tasks: [test],
+      waiting: false,
     });
-    expect(session.backgroundTasks).toEqual(["npm test"]);
+    expect(session.backgroundTasks).toEqual([test]);
+    expect(session.waitingOnBackground).toBeUndefined();
+
+    session = applyHarnessEvent(session, {
+      type: "background.updated",
+      tasks: [test],
+      waiting: true,
+    });
+    expect(session.waitingOnBackground).toBe(true);
 
     session = applyHarnessEvent(session, {
       type: "background.updated",
       tasks: [],
+      waiting: false,
     });
     expect(session.backgroundTasks).toBeUndefined();
+    expect(session.waitingOnBackground).toBeUndefined();
 
     session = applyHarnessEvent(session, {
       type: "background.updated",
-      tasks: ["npm run dev"],
+      tasks: [{ id: "b2", kind: "shell", description: "npm run dev" }],
+      waiting: true,
     });
     session = stopStreaming(session);
     expect(session.backgroundTasks).toBeUndefined();
+    expect(session.waitingOnBackground).toBeUndefined();
   });
 });
 

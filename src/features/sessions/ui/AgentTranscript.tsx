@@ -68,6 +68,7 @@ import {
   hasPendingApproval,
   HARNESS_TITLE,
   type AgentStep,
+  type BackgroundTask,
   type Block,
   type HarnessId,
   type InterjectionMeta,
@@ -156,7 +157,7 @@ type Props = {
   modelSettings?: Record<string, string>;
   pendingQuestion?: boolean;
   /** Work the agent left running when it yielded; the turn waits on it. */
-  backgroundTasks?: string[];
+  backgroundTasks?: BackgroundTask[];
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
   onAddToChat?: (text: string) => void;
   onSaveNote?: (text: string) => void | Promise<void>;
@@ -985,7 +986,7 @@ function LiveFoldTitle({
   startedAt?: number;
   paused: boolean;
   waitingLabel?: string;
-  background?: string[];
+  background?: BackgroundTask[];
   modelName?: string;
 }) {
   const elapsedMs = useElapsedFrom(startedAt, paused);
@@ -1002,7 +1003,7 @@ function LiveFoldTitle({
     </Shimmer>
   );
   return background?.length ? (
-    <span className="flex min-w-0" title={background.join("\n")}>
+    <span className="flex min-w-0" title={background.map((task) => task.description).join("\n")}>
       {shimmer}
     </span>
   ) : (
@@ -1010,7 +1011,7 @@ function LiveFoldTitle({
   );
 }
 
-function backgroundLabel(tasks: string[]): string {
+function backgroundLabel(tasks: BackgroundTask[]): string {
   return tasks.length === 1
     ? "running in background"
     : `${tasks.length} tasks running in background`;

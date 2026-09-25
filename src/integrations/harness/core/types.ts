@@ -1,6 +1,7 @@
 import type {
   AgentStepKind,
   Attachment,
+  BackgroundTask,
   InterjectionMeta,
   RuntimeMode,
   TaskListItem,
@@ -23,10 +24,10 @@ export type HarnessEvent =
     }
   | { type: "status"; text: string }
   /**
-   * The agent has yielded but the turn is not over: work it started is still
-   * running and will wake it again. Empty once it is back at work.
+   * Background work still running. `waiting` is set once the agent has yielded
+   * and the turn stays open only for that work, which will wake it again.
    */
-  | { type: "background.updated"; tasks: string[] }
+  | { type: "background.updated"; tasks: BackgroundTask[]; waiting: boolean }
   | ({ type: "interjection"; text: string } & InterjectionMeta)
   | { type: "message.delta"; text: string }
   | { type: "message.completed" }

@@ -368,6 +368,7 @@ import {
   type RuntimeMode,
   type PlanStatus,
   type SecondOpinionMeta,
+  type BackgroundTask,
   type Session,
   type WorkspaceMode,
 } from "../features/sessions/model/session";
@@ -630,6 +631,14 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
   for (const value of a) {
     if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+function mapsEqual<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
   }
   return true;
 }
@@ -1341,6 +1350,21 @@ export default function App({
     busySessionIdsRef.current = nextBusySessionIds;
   }
   const busySessionIds = busySessionIdsRef.current;
+
+  const nextBackgroundSessionTasks = useMemo(() => {
+    const tasks = new Map<string, BackgroundTask[]>();
+    for (const session of sessions) {
+      if (!session.backgroundTasks) continue;
+      if (session.busy && !session.waitingOnBackground) continue;
+      tasks.set(session.id, session.backgroundTasks);
+    }
+    return tasks;
+  }, [sessions]);
+  const backgroundSessionTasksRef = useRef(nextBackgroundSessionTasks);
+  if (!mapsEqual(backgroundSessionTasksRef.current, nextBackgroundSessionTasks)) {
+    backgroundSessionTasksRef.current = nextBackgroundSessionTasks;
+  }
+  const backgroundSessionTasks = backgroundSessionTasksRef.current;
 
   /** Probe the active session's harness for its live model catalog whenever
    * the active harness changes. Catalogs load lazily (probing spawns a CLI
@@ -5651,7 +5675,7 @@ export default function App({
             : // The agent has yielded and only background work is left, which
               // may never end (a dev server). Queuing would park the message
               // behind it, so hand it to the agent now.
-              current.backgroundTasks?.length
+              current.waitingOnBackground
               ? "steer"
               : (options?.followUpBehavior ?? loadFollowUpBehavior());
         if (followUpBehavior === "queue") {
@@ -9071,6 +9095,7 @@ export default function App({
               searchFocusToken={searchFocusToken}
               sessions={sidebarHistory}
               busySessionIds={busySessionIds}
+              backgroundSessionTasks={backgroundSessionTasks}
               approvalSessionIds={approvalSessionIds}
               activeSessionId={active?.id}
               status={historyFailed ? "error" : "idle"}

@@ -1,7 +1,10 @@
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { homeDir } from "../../../../platform/tauri/fs";
 import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
-import type { RuntimeMode } from "../../../../features/sessions/model/session";
+import type {
+  BackgroundTask,
+  RuntimeMode,
+} from "../../../../features/sessions/model/session";
 import {
   claudeEffectiveConfigDir,
   loadClaudeConfigDir,
@@ -35,9 +38,11 @@ import {
   extractAskUserQuestionTitle,
   extractExitPlanModePlan,
   inputJsonDeltaFromEvent,
+  backgroundTaskKind,
   isAgentTaskType,
   isClaudeUltracodeEffort,
   isSubagentMessage,
+  isTaskNotificationResult,
   isTerminalAgentTaskStatus,
   isTodoTool,
   normalizeClaudeCliEffort,
@@ -125,7 +130,7 @@ type LiveAgentTask = {
   backgrounded: boolean;
 };
 
-type BackgroundTask = {
+type TrackedTask = {
   description: string;
   toolUseId?: string;
 };
@@ -151,16 +156,24 @@ type Live = {
    * backgrounded, monitors. Each one ends in a notification that wakes Claude
    * for another turn, so the MonoCode turn stays open until they are done.
    */
-  backgroundTasks: Map<string, BackgroundTask>;
+  backgroundTasks: Map<string, TrackedTask>;
   /** Rows shown for tasks still running when Claude yielded, by task id. */
   backgroundRows: Map<string, string>;
+  /** What Claude last reported as running in the background, in its order. */
+  runningTasks: BackgroundTask[];
   /** A task finished after Claude yielded; its follow-up turn is on the way. */
   awaitingResume: ReturnType<typeof setTimeout> | null;
-  /** Last background list sent to the UI, to skip repeats. */
+  /** Last background state sent to the UI, to skip repeats. */
   backgroundKey: string;
   /** Finished-subagent notes held until Claude picks the thread back up. */
   taskNotes: string[];
   turnResultSeen: boolean;
+  /**
+   * Claude answered the prompt this turn sent. Until then a result for a turn
+   * Claude ran on a task notification belongs to earlier work, such as a task
+   * a restart killed, and must not end this turn.
+   */
+  promptAnswered: boolean;
   cancelled: boolean;
   muteUpdates: boolean;
   turns: Promise<void>;
@@ -189,6 +202,8 @@ const INIT_TIMEOUT_MS = 8_000;
  * is let go anyway. The follow-up turn normally starts within a second or two.
  */
 const RESUME_GRACE_MS = 15_000;
+/** No background work and no wait: what the UI assumes when a turn starts. */
+const IDLE_BACKGROUND_KEY = backgroundKey(false, []);
 
 const liveByThread = new Map<string, Live>();
 const resumeByThread = new Map<string, Resume>();
@@ -445,10 +460,12 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     agentTasks: new Map(),
     backgroundTasks: new Map(),
     backgroundRows: new Map(),
+    runningTasks: [],
     awaitingResume: null,
-    backgroundKey: "",
+    backgroundKey: IDLE_BACKGROUND_KEY,
     taskNotes: [],
     turnResultSeen: false,
+    promptAnswered: false,
     cancelled: false,
     muteUpdates: false,
     turns: Promise.resolve(),
@@ -542,15 +559,17 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.backgroundTasks.clear();
   live.backgroundRows.clear();
   clearAwaitingResume(live);
-  live.backgroundKey = "";
+  live.backgroundKey = IDLE_BACKGROUND_KEY;
   live.taskNotes = [];
   live.turnResultSeen = false;
+  live.promptAnswered = false;
 
   const turnPromise = new Promise<void>((resolve, reject) => {
     live.turnDone = resolve;
     live.turnFailed = reject;
   });
   live.activeTurn = true;
+  syncBackground(live);
   settlePendingTurn(live);
 
   try {
@@ -876,6 +895,7 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
 
 function handleResult(live: Live, rec: Record<string, unknown>): void {
   if (isSubagentMessage(rec)) return;
+  if (!live.promptAnswered && isTaskNotificationResult(rec)) return;
   // A /compact result reports the summarizer call's usage, not the rebuilt
   // conversation level. The next real turn will provide the fresh reading.
   if (!live.manualCompaction) {
@@ -889,10 +909,11 @@ function handleResult(live: Live, rec: Record<string, unknown>): void {
   if (result.status === "failed" && result.error && !live.cancelled) {
     live.onEvent({ type: "session.error", message: result.error });
   }
+  live.promptAnswered = true;
   live.turnResultSeen = true;
   maybeFinishTurn(live);
   showBackgroundRows(live);
-  syncBackgroundWait(live);
+  syncBackground(live);
 }
 
 async function handleControlRequest(
@@ -1104,7 +1125,7 @@ function handleAgentLifecycle(
       description: started.description,
       toolUseId: started.toolUseId,
     });
-    syncBackgroundWait(live);
+    syncBackground(live);
     if (!isAgentTaskType(started.taskType)) return true;
     live.agentTasks.set(started.taskId, {
       taskId: started.taskId,
@@ -1187,6 +1208,11 @@ function handleAgentLifecycle(
 
   const allTasks = parseBackgroundTasks(rec);
   if (!allTasks) return false;
+  live.runningTasks = allTasks.map((task) => ({
+    id: task.taskId,
+    kind: backgroundTaskKind(task.taskType),
+    description: task.description,
+  }));
   const next = new Set(allTasks.map((task) => task.taskId));
   for (const id of [...live.backgroundTasks.keys()]) {
     if (next.has(id)) continue;
@@ -1212,7 +1238,7 @@ function handleAgentLifecycle(
     upsertAgentTool(live, undefined, row.description, "in_progress");
   }
   maybeFinishTurn(live);
-  syncBackgroundWait(live);
+  syncBackground(live);
   return true;
 }
 
@@ -1258,8 +1284,25 @@ function subagentParent(
   const parentId = stringField(rec, "parent_tool_use_id");
   if (!parentId) return undefined;
   const parent = live.toolsById.get(parentId);
-  if (!parent || !isAgentToolName(parent.name)) return undefined;
-  return parent;
+  if (parent && isAgentToolName(parent.name)) return parent;
+  return resumedAgentRow(live, stringField(rec, "task_description"));
+}
+
+/**
+ * A subagent resumed with SendMessage still names the Agent call that first
+ * spawned it, often from an earlier process. Its row belongs to the call that
+ * resumed it, found through the task that call started.
+ */
+function resumedAgentRow(
+  live: Live,
+  description: string | undefined,
+): InFlightTool | undefined {
+  if (!description) return undefined;
+  for (const task of live.agentTasks.values()) {
+    if (task.description !== description || !task.toolUseId) continue;
+    return live.toolsById.get(task.toolUseId);
+  }
+  return undefined;
 }
 
 /**
@@ -1451,11 +1494,11 @@ function finishBackgroundTask(live: Live, taskId: string): void {
     live.awaitingResume = setTimeout(() => {
       live.awaitingResume = null;
       maybeFinishTurn(live);
-      syncBackgroundWait(live);
+      syncBackground(live);
     }, RESUME_GRACE_MS);
   }
   maybeFinishTurn(live);
-  syncBackgroundWait(live);
+  syncBackground(live);
 }
 
 /**
@@ -1480,7 +1523,7 @@ function noteClaudeTurnStarted(live: Live): void {
   for (const text of live.taskNotes) live.onEvent({ type: "status", text });
   live.taskNotes = [];
   clearAwaitingResume(live);
-  syncBackgroundWait(live);
+  syncBackground(live);
 }
 
 /**
@@ -1558,19 +1601,25 @@ function clearAwaitingResume(live: Live): void {
 }
 
 /**
- * Tells the UI what the turn is waiting on once Claude has yielded with work
- * still running, and clears it when Claude picks the thread back up.
+ * Tells the UI what runs in the background, and whether the turn only waits on
+ * it because Claude has yielded. The wait clears when Claude picks back up.
  */
-function syncBackgroundWait(live: Live): void {
+function syncBackground(live: Live): void {
   const waiting =
-    live.activeTurn && live.turnResultSeen && !live.cancelled
-      ? [...live.backgroundTasks.values()].map((task) => task.description)
-      : [];
-  const key = waiting.join("\n");
+    live.activeTurn &&
+    live.turnResultSeen &&
+    !live.cancelled &&
+    live.backgroundTasks.size > 0;
+  const tasks = live.runningTasks;
+  const key = backgroundKey(waiting, tasks);
   if (key === live.backgroundKey) return;
   live.backgroundKey = key;
   if (live.muteUpdates) return;
-  live.onEvent({ type: "background.updated", tasks: waiting });
+  live.onEvent({ type: "background.updated", tasks, waiting });
+}
+
+function backgroundKey(waiting: boolean, tasks: BackgroundTask[]): string {
+  return JSON.stringify([waiting, tasks]);
 }
 
 function maybeFinishTurn(live: Live): void {

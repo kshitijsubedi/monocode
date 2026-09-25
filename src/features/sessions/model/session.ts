@@ -61,6 +61,13 @@ export type TaskListItem = {
   status: TaskListItemStatus;
 };
 
+/** Work the agent started that runs on its own: a subagent, a shell, a monitor. */
+export type BackgroundTask = {
+  id: string;
+  kind: "agent" | "shell" | "other";
+  description: string;
+};
+
 export type TaskListMeta = {
   /** Provider identity for replacing later snapshots of the same list. */
   key?: string;
@@ -348,11 +355,13 @@ export type Session = {
   blocks: Block[];
   /** True while a harness turn is in flight. */
   busy?: boolean;
+  /** Work still running in the background. In-memory only. */
+  backgroundTasks?: BackgroundTask[];
   /**
-   * What the live turn is waiting on after the agent yielded with work still
-   * running in the background. In-memory only.
+   * The agent has yielded and the live turn only waits on background work.
+   * In-memory only.
    */
-  backgroundTasks?: string[];
+  waitingOnBackground?: true;
   /** Follow-ups waiting for current turn. In-memory only. */
   queuedMessages?: QueuedMessage[];
   /** Paused after user stops current turn; resuming waits for continued turn. */

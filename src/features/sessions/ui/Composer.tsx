@@ -69,6 +69,7 @@ import type { HandoffComposerCard } from "../model/handoff";
 import { looksLikeProject, type RecentProject } from "../../projects/model/recents";
 import type {
   Attachment,
+  BackgroundTask,
   HarnessId,
   MessageQueueStatus,
   QueuedMessage,
@@ -113,6 +114,7 @@ import { NoteMiniCard } from "../../notes/ui";
 import { HandoffMiniCard } from "./HandoffMiniCard";
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { QuestionForm } from "./QuestionForm";
+import { BackgroundTasksStrip } from "./BackgroundTasksStrip";
 import { SkillPicker } from "../../skills/ui/SkillPicker";
 import { pathKey, projectKey } from "../../../shared/lib/paths";
 import { consumeQuoteRequest, type QuoteRequest } from "../model/quoteDraft";
@@ -183,6 +185,7 @@ type Props = {
   busy?: boolean;
   editLastTurnSupported?: boolean;
   lastTurnRecall?: LastTurnRecall | null;
+  backgroundTasks?: BackgroundTask[];
   queuedMessages?: QueuedMessage[];
   queueStatus?: MessageQueueStatus;
   hotkeys?: boolean;
@@ -455,6 +458,7 @@ export function Composer({
   busy = false,
   editLastTurnSupported = false,
   lastTurnRecall = null,
+  backgroundTasks = [],
   queuedMessages = [],
   queueStatus,
   onFocus,
@@ -1530,6 +1534,7 @@ export function Composer({
         />
       ) : null}
       {children}
+      <BackgroundTasksStrip tasks={backgroundTasks} />
       <MessageQueue
         messages={queuedMessages}
         status={queueStatus}

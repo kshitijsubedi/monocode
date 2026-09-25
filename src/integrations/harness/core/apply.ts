@@ -110,13 +110,18 @@ export function applyHarnessEvent(
       return mergeTurnMetrics(session, event);
     case "tasks.updated":
       return upsertTaskList(session, event);
-    case "background.updated":
-      if (event.tasks.length === 0) {
-        if (!session.backgroundTasks) return session;
-        const { backgroundTasks: _cleared, ...rest } = session;
-        return rest;
-      }
-      return { ...session, backgroundTasks: event.tasks };
+    case "background.updated": {
+      const {
+        backgroundTasks: _tasks,
+        waitingOnBackground: _waiting,
+        ...rest
+      } = session;
+      return {
+        ...rest,
+        ...(event.tasks.length > 0 ? { backgroundTasks: event.tasks } : {}),
+        ...(event.waiting ? { waitingOnBackground: true } : {}),
+      };
+    }
     case "plan":
       return upsertPlan(session, event);
     case "session.error":
@@ -445,8 +450,11 @@ export function appendSteerUser(
 }
 
 export function stopStreaming(session: Session): Session {
-  const { backgroundTasks: _cleared, ...settled } =
-    settlePendingApprovals(session);
+  const {
+    backgroundTasks: _tasks,
+    waitingOnBackground: _waiting,
+    ...settled
+  } = settlePendingApprovals(session);
   return {
     ...settled,
     busy: false,

@@ -106,7 +106,11 @@ import {
   saveSessionSidebarFilters,
   type SessionSidebarFilters,
 } from "../../features/sessions/model/sessionFilters";
-import type { HarnessId, LinkedWorkItem } from "../../features/sessions/model/session";
+import type {
+  BackgroundTask,
+  HarnessId,
+  LinkedWorkItem,
+} from "../../features/sessions/model/session";
 import type { LiveAgent } from "../../features/sessions/model/liveAgents";
 import type { SessionSummary } from "../../features/sessions/data/sessionStore";
 import type { SettingsSectionId } from "../../features/settings/model/settings";
@@ -195,6 +199,8 @@ type Props = {
   open: boolean;
   sessions: SessionSummary[];
   busySessionIds: Set<string>;
+  /** Sessions whose only work left runs in the background. */
+  backgroundSessionTasks?: ReadonlyMap<string, BackgroundTask[]>;
   approvalSessionIds: Set<string>;
   activeSessionId?: string;
   /** Open tabs, including blank ones not yet in history. */
@@ -295,6 +301,7 @@ function SidebarComponent({
   open,
   sessions,
   busySessionIds,
+  backgroundSessionTasks = NO_BACKGROUND_TASKS,
   approvalSessionIds,
   activeSessionId,
   openSessions = [],
@@ -1241,6 +1248,7 @@ function SidebarComponent({
         isActive={session.id === activeSessionId}
         isSelected={selectedSessionIds.has(session.id)}
         busy={busySessionIds.has(session.id)}
+        background={backgroundSessionTasks.get(session.id)}
         done={unseenFinishedIds.has(session.id)}
         linkedUpdate={linkedSessionUpdateIds.has(session.id)}
         needsApproval={approvalSessionIds.has(session.id)}
@@ -2701,12 +2709,14 @@ function FolderRenameRow({
 }
 
 const SESSION_PREFETCH_DELAY_MS = 120;
+const NO_BACKGROUND_TASKS: ReadonlyMap<string, BackgroundTask[]> = new Map();
 
 const SessionCard = memo(function SessionCard({
   session,
   isActive,
   isSelected,
   busy,
+  background,
   done,
   linkedUpdate,
   needsApproval,
@@ -2728,6 +2738,8 @@ const SessionCard = memo(function SessionCard({
   isActive: boolean;
   isSelected: boolean;
   busy: boolean;
+  /** Work still running after the agent yielded, or after its turn ended. */
+  background?: BackgroundTask[];
   done: boolean;
   linkedUpdate: boolean;
   needsApproval: boolean;
@@ -2776,7 +2788,7 @@ const SessionCard = memo(function SessionCard({
       : resolveModel(session.harness, session.model).name;
   const statusClass = needsApproval
     ? "text-amber-400"
-    : busy
+    : background || busy
       ? "text-accent"
       : done
         ? "text-emerald-400"
@@ -2792,6 +2804,17 @@ const SessionCard = memo(function SessionCard({
           <CircleAlert className="size-3" strokeWidth={1.75} />
           <span>{orchestration ? "Needs input" : "Need approval"}</span>
         </>
+      ) : background ? (
+        <span
+          className="flex items-center gap-1"
+          title={background.map((task) => task.description).join("\n")}
+        >
+          <span
+            aria-hidden
+            className="mx-0.75 size-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)] motion-safe:animate-pulse"
+          />
+          <span>{background.length} in background</span>
+        </span>
       ) : busy ? (
         <>
           <TerminalSpinner className="inline-block w-3 select-none text-center text-[11px] leading-none text-accent" />

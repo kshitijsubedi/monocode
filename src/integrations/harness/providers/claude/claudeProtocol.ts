@@ -468,6 +468,13 @@ export function statusTextFromSystem(
   return compact ? "Compacted context" : undefined;
 }
 
+/** A result for a turn Claude ran on its own to take in a task notification. */
+export function isTaskNotificationResult(
+  rec: Record<string, unknown>,
+): boolean {
+  return stringField(asRecord(rec.origin), "kind") === "task-notification";
+}
+
 export function turnStatusFromResult(rec: Record<string, unknown>): {
   status: "completed" | "failed" | "interrupted" | "cancelled";
   error?: string;
@@ -567,6 +574,13 @@ export function isSubagentMessage(rec: Record<string, unknown>): boolean {
 export function isAgentTaskType(taskType: string | undefined): boolean {
   const key = (taskType ?? "").toLowerCase();
   return key === "local_agent" || key === "remote_agent";
+}
+
+export function backgroundTaskKind(
+  taskType: string,
+): "agent" | "shell" | "other" {
+  if (isAgentTaskType(taskType)) return "agent";
+  return taskType.toLowerCase() === "local_bash" ? "shell" : "other";
 }
 
 export type ClaudeAgentTaskStarted = {
